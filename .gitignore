@@ -1,0 +1,39 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing and linting caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDEs and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local SQLite databases (prevents accidental commits of test/user data)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+!example.sqlite3
