@@ -6,9 +6,11 @@ from tkinter import filedialog, messagebox, ttk
 from sqlite_reader.database import DatabaseConnection
 from sqlite_reader.query_service import execute_user_query
 from sqlite_reader.schema import quote_identifier
+from sqlite_reader.ui.dialogs import confirm_mutation
 from sqlite_reader.ui.result_grid import ResultGrid
 from sqlite_reader.ui.schema_panel import SchemaPanel
 from sqlite_reader.ui.sql_editor import SqlEditor
+from sqlite_reader.validation import StatementType, classify_statement
 
 
 class MainWindow:
@@ -91,11 +93,41 @@ class MainWindow:
             messagebox.showwarning("No Database", "Please open a database first.")
             return
 
+        stmt_type = classify_statement(sql)
+
+        if self.db.is_read_only and stmt_type in (
+            StatementType.MUTATION,
+            StatementType.SCHEMA,
+            StatementType.MAINTENANCE,
+        ):
+            messagebox.showerror(
+                "Read-Only Mode Active",
+                "Cannot execute mutating operations on a Read-Only database connection.\n\n"
+                "Please reopen the database in Editable mode to make changes.",
+                parent=self.root,
+            )
+            self._update_status("Blocked mutating query in read-only mode.")
+            return
+
+        if stmt_type in (
+            StatementType.MUTATION,
+            StatementType.SCHEMA,
+            StatementType.MAINTENANCE,
+        ):
+            db_name = self.db.db_path.name if self.db.db_path else "Database"
+            if not confirm_mutation(self.root, sql, stmt_type, db_name):
+                self._update_status("Execution cancelled by user.")
+                return
+
         try:
             result = execute_user_query(self.db, sql)
             self.result_grid.display_query_result(result)
             self._update_status(result.message)
-        except (sqlite3.Error, ValueError, RuntimeError) as e:
+
+            if stmt_type in (StatementType.SCHEMA, StatementType.MUTATION):
+                self.schema_panel.refresh()
+
+        except (sqlite3.Error, ValueError, RuntimeError, PermissionError) as e:
             self.result_grid.display_error(str(e))
             self._update_status(f"Execution failed: {e}")
 

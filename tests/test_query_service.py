@@ -1,4 +1,3 @@
-import sqlite3
 from collections.abc import Generator
 from pathlib import Path
 
@@ -96,8 +95,11 @@ def test_execute_user_query_empty(data_db: DatabaseConnection) -> None:
 def test_execute_user_query_read_only_rejection(temp_db_path: Path) -> None:
     db = DatabaseConnection()
     db.open(temp_db_path, read_only=True)
-
-    with pytest.raises(sqlite3.OperationalError):
-        execute_user_query(db, "CREATE TABLE forbidden (id INT)")
-
-    db.close()
+    try:
+        with pytest.raises(
+            PermissionError,
+            match="Cannot execute mutating or schema statement on a read-only database connection.",
+        ):
+            execute_user_query(db, "CREATE TABLE forbidden (id INT)")
+    finally:
+        db.close()

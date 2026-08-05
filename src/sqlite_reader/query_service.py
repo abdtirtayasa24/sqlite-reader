@@ -1,9 +1,11 @@
+import sqlite3
 import time
 from typing import Any
 
 from sqlite_reader.database import DatabaseConnection
 from sqlite_reader.models import QueryResult
 from sqlite_reader.schema import get_table_columns, quote_identifier
+from sqlite_reader.validation import StatementType, classify_statement
 
 
 def get_table_count(db: DatabaseConnection, table_name: str) -> int:
@@ -50,8 +52,29 @@ def execute_user_query(
     if not stripped_sql:
         raise ValueError("SQL statement cannot be empty.")
 
+    stmt_type = classify_statement(stripped_sql)
+
+    if db.is_read_only and stmt_type in (
+        StatementType.MUTATION,
+        StatementType.SCHEMA,
+        StatementType.MAINTENANCE,
+    ):
+        raise PermissionError(
+            "Cannot execute mutating or schema statement on a read-only database connection."
+        )
+
+    is_mutation = stmt_type in (StatementType.MUTATION, StatementType.SCHEMA)
     start_time = time.perf_counter()
-    cursor = db.execute(stripped_sql)
+
+    try:
+        cursor = db.execute(stripped_sql)
+        if is_mutation:
+            db.commit()
+    except (sqlite3.Error, ValueError, RuntimeError, PermissionError):
+        if is_mutation:
+            db.rollback()
+        raise
+
     execution_time_ms = (time.perf_counter() - start_time) * 1000.0
 
     if cursor.description:
