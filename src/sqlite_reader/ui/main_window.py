@@ -3,6 +3,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from sqlite_reader.database import DatabaseConnection
+from sqlite_reader.ui.result_grid import ResultGrid
 from sqlite_reader.ui.schema_panel import SchemaPanel
 
 
@@ -10,7 +11,7 @@ class MainWindow:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("SQLite Reader")
-        self.root.geometry("800x600")
+        self.root.geometry("900x600")
 
         self.db = DatabaseConnection()
 
@@ -49,15 +50,17 @@ class MainWindow:
         self.paned_window.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
 
         # Left Pane: Schema Explorer
-        self.schema_panel = SchemaPanel(self.paned_window, self.db)
+        self.schema_panel = SchemaPanel(
+            self.paned_window, self.db, on_table_selected=self._on_table_selected
+        )
         self.paned_window.add(self.schema_panel, weight=1)
 
         # Right Pane: Placeholder for future Result Grid / SQL Editor
         self.right_frame = ttk.Frame(self.paned_window)
         self.paned_window.add(self.right_frame, weight=3)
 
-        self.placeholder_label = tk.Label(self.right_frame, text="No database open.")
-        self.placeholder_label.pack(expand=True)
+        self.result_grid = ResultGrid(self.right_frame, self.db)
+        self.result_grid.pack(expand=True, fill=tk.BOTH)
 
         # Status Bar
         self.status_var = tk.StringVar()
@@ -68,6 +71,10 @@ class MainWindow:
 
     def _update_status(self, message: str) -> None:
         self.status_var.set(message)
+
+    def _on_table_selected(self, table_name: str) -> None:
+        self.result_grid.load_table(table_name)
+        self._update_status(f"Loaded table: {table_name}")
 
     def _open_database(self, read_only: bool) -> None:
         file_path = filedialog.askopenfilename(
@@ -86,10 +93,10 @@ class MainWindow:
             mode_str = "Read-Only" if read_only else "Editable"
 
             self.root.title(f"SQLite Reader - {db_path.name} ({mode_str})")
-            self.placeholder_label.config(text=f"Opened: {db_path}\nMode: {mode_str}")
             self._update_status(f"Opened database successfully in {mode_str} mode.")
 
             self.schema_panel.refresh()
+            self.result_grid.clear()
 
         except Exception as e:
             messagebox.showerror("Error Opening Database", str(e))
@@ -98,8 +105,8 @@ class MainWindow:
     def _close_database(self) -> None:
         self.db.close()
         self.root.title("SQLite Reader")
-        self.placeholder_label.config(text="No database open.")
         self.schema_panel.refresh()
+        self.result_grid.clear()
         self._update_status("Database closed.")
 
     def _refresh_schema(self) -> None:

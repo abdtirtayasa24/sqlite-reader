@@ -1,4 +1,5 @@
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import ttk
 from typing import Any
 
@@ -7,9 +8,15 @@ from sqlite_reader.schema import get_schema_objects, get_table_columns
 
 
 class SchemaPanel(ttk.Frame):
-    def __init__(self, parent: tk.Widget, db: DatabaseConnection) -> None:
+    def __init__(
+        self,
+        parent: tk.Widget,
+        db: DatabaseConnection,
+        on_table_selected: Callable[[str], None],
+    ) -> None:
         super().__init__(parent)
         self.db = db
+        self.on_table_selected = on_table_selected
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -81,6 +88,8 @@ class SchemaPanel(ttk.Frame):
                             f"--   {col.name} ({col.type}){pk_str}{notnull_str}\n"
                         )
                     details_text += "\n"
+
+                self.on_table_selected(obj_name)
 
             objects = get_schema_objects(self.db)
             for obj in objects:
