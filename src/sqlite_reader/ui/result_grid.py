@@ -1,9 +1,11 @@
 import sqlite3
 import tkinter as tk
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 from sqlite_reader.database import DatabaseConnection
+from sqlite_reader.export import export_query_to_csv, export_to_csv
 from sqlite_reader.models import QueryResult
 from sqlite_reader.query_service import (
     delete_record,
@@ -13,7 +15,7 @@ from sqlite_reader.query_service import (
     insert_record,
     update_record,
 )
-from sqlite_reader.schema import get_table_columns
+from sqlite_reader.schema import get_table_columns, quote_identifier
 from sqlite_reader.ui.dialogs import RecordFormDialog
 
 
@@ -26,6 +28,7 @@ class ResultGrid(ttk.Frame):
         self.offset = 0
         self.total_rows = 0
         self.current_cols: list[str] = []
+        self.current_rows: list[tuple[Any, ...]] = []
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -57,6 +60,14 @@ class ResultGrid(ttk.Frame):
         )
         self.btn_delete.pack(side=tk.LEFT, padx=2)
 
+        self.btn_export = ttk.Button(
+            self.action_bar,
+            text="💾 Export CSV",
+            command=self.export_csv,
+            state="disabled",
+        )
+        self.btn_export.pack(side=tk.RIGHT, padx=2)
+
         # Grid Treeview
         self.tree = ttk.Treeview(self, show="headings")
         self.tree.bind("<<TreeviewSelect>>", self._on_row_select)
@@ -75,7 +86,7 @@ class ResultGrid(ttk.Frame):
 
         # Pagination controls
         ctrl_frame = ttk.Frame(self)
-        ctrl_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=5, padx=5)
+        ctrl_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5, padx=5)
 
         self.btn_prev = ttk.Button(
             ctrl_frame, text="< Prev", command=self._prev_page, state="disabled"
@@ -113,10 +124,12 @@ class ResultGrid(ttk.Frame):
 
         if result.columns:
             self._update_grid(list(result.columns), list(result.rows))
+            self.btn_export.state(["!disabled"])
         else:
             self.tree["columns"] = ("Status",)
             self.tree.heading("Status", text="Execution Status")
             self.tree.insert("", tk.END, values=(result.message,))
+            self.btn_export.state(["disabled"])
 
         self.btn_prev.state(["disabled"])
         self.btn_next.state(["disabled"])
@@ -134,6 +147,7 @@ class ResultGrid(ttk.Frame):
 
         self.btn_prev.state(["disabled"])
         self.btn_next.state(["disabled"])
+        self.btn_export.state(["disabled"])
         self.lbl_page.config(text="Error")
         self.lbl_info.config(text=message)
 
@@ -146,6 +160,42 @@ class ResultGrid(ttk.Frame):
         self.lbl_info.config(text="")
         self.btn_prev.state(["disabled"])
         self.btn_next.state(["disabled"])
+        self.btn_export.state(["disabled"])
+
+    def export_csv(self) -> None:
+        """Exports currently loaded grid data or full table to a CSV file."""
+        if not self.current_cols:
+            return
+
+        file_path_str = filedialog.asksaveasfilename(
+            title="Export CSV File",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+        )
+        if not file_path_str:
+            return
+
+        dest = Path(file_path_str)
+        try:
+            if self.current_table and self.db.db_path:
+                sql = f"SELECT * FROM {quote_identifier(self.current_table)}"
+                count = export_query_to_csv(self.db, sql, dest)
+                messagebox.showinfo(
+                    "Export Successful",
+                    f"Exported {count} row(s) to '{dest.name}'.",
+                    parent=self,
+                )
+            else:
+                export_to_csv(self.current_cols, self.current_rows, dest)
+                messagebox.showinfo(
+                    "Export Successful",
+                    f"Exported {len(self.current_rows)} row(s) to '{dest.name}'.",
+                    parent=self,
+                )
+        except (OSError, sqlite3.Error, RuntimeError) as e:
+            messagebox.showerror(
+                "Export Error", f"Failed to export CSV: {e}", parent=self
+            )
 
     def _fetch_table_data(self) -> None:
         if not self.current_table or not self.db.db_path:
@@ -157,6 +207,7 @@ class ResultGrid(ttk.Frame):
             )
             self._update_grid(cols, rows)
             self._update_controls(len(rows))
+            self.btn_export.state(["!disabled"])
         except (sqlite3.Error, RuntimeError) as e:
             self.display_error(str(e))
 
@@ -237,7 +288,7 @@ class ResultGrid(ttk.Frame):
         if not identifiers:
             messagebox.showwarning(
                 "Cannot Edit Row",
-                "This table has no primary key or rowid identifier to target single rows safely.",
+                "No primary key or rowid identifier available.",
                 parent=self,
             )
             return
@@ -281,7 +332,7 @@ class ResultGrid(ttk.Frame):
         if not identifiers:
             messagebox.showwarning(
                 "Cannot Delete Row",
-                "This table has no primary key or rowid identifier to target single rows safely.",
+                "No primary key or rowid identifier available.",
                 parent=self,
             )
             return

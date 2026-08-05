@@ -37,9 +37,8 @@ class MainWindow:
             label="Open (Editable)...",
             command=lambda: self._open_database(read_only=False),
         )
-        file_menu.add_command(
-            label="Close Database", command=lambda: self._close_database
-        )
+        file_menu.add_command(label="Backup Database...", command=self._backup_database)
+        file_menu.add_command(label="Close Database", command=self._close_database)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=file_menu)
@@ -102,8 +101,8 @@ class MainWindow:
         ):
             messagebox.showerror(
                 "Read-Only Mode Active",
-                "Cannot execute mutating operations on a Read-Only database connection.\n\n"
-                "Please reopen the database in Editable mode to make changes.",
+                "Cannot execute mutating operations on a Read-Only mode.\n\n"
+                "Reopen in Editable mode to make changes.",
                 parent=self.root,
             )
             self._update_status("Blocked mutating query in read-only mode.")
@@ -130,6 +129,38 @@ class MainWindow:
         except (sqlite3.Error, ValueError, RuntimeError, PermissionError) as e:
             self.result_grid.display_error(str(e))
             self._update_status(f"Execution failed: {e}")
+
+    def _backup_database(self) -> None:
+        if not self.db.db_path:
+            messagebox.showwarning("No Database", "No database is currently open.")
+            return
+
+        file_path_str = filedialog.asksaveasfilename(
+            title="Backup Database To...",
+            defaultextension=".sqlite3",
+            filetypes=[
+                ("SQLite Databases", "*.sqlite *.sqlite3 *.db"),
+                ("All Files", "*.*"),
+            ],
+        )
+        if not file_path_str:
+            return
+
+        dest = Path(file_path_str)
+        try:
+            self.db.backup(dest)
+            messagebox.showinfo(
+                "Backup Complete",
+                f"Successfully created database backup at '{dest}'.",
+                parent=self.root,
+            )
+            self._update_status(f"Database backed up to {dest.name}")
+        except (sqlite3.Error, ValueError, RuntimeError, OSError) as e:
+            messagebox.showerror(
+                "Backup Failed",
+                f"Could not create database backup:\n{e}",
+                parent=self.root,
+            )
 
     def _open_database(self, read_only: bool) -> None:
         file_path = filedialog.askopenfilename(

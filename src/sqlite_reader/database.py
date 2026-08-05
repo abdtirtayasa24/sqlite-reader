@@ -58,3 +58,35 @@ class DatabaseConnection:
         if not self._connection:
             raise RuntimeError("No database connection is open.")
         self._connection.rollback()
+
+    def backup(self, destination: Path) -> None:
+        """
+        Creates an online backup using SQLite's Backup API.
+        Verifies the backup file using PRAGMA integrity_check.
+        """
+        if not self._connection or not self.db_path:
+            raise RuntimeError("No database connection is open.")
+
+        if destination.resolve() == self.db_path.resolve():
+            raise ValueError(
+                "Backup destination file cannot be the same as the source database."
+            )
+
+        dest_conn = sqlite3.connect(destination)
+        try:
+            with dest_conn:
+                self._connection.backup(dest_conn)
+        finally:
+            dest_conn.close()
+
+        verify_db = DatabaseConnection()
+        try:
+            verify_db.open(destination, read_only=True)
+            cursor = verify_db.execute("PRAGMA integrity_check")
+            res = cursor.fetchone()
+            if not res or res[0] != "ok":
+                raise RuntimeError(
+                    f"Backup verification failed: {res[0] if res else 'Unknown error'}"
+                )
+        finally:
+            verify_db.close()
