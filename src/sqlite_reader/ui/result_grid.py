@@ -1,8 +1,10 @@
+import sqlite3
 import tkinter as tk
 from tkinter import ttk
 from typing import Any
 
 from sqlite_reader.database import DatabaseConnection
+from sqlite_reader.models import QueryResult
 from sqlite_reader.query_service import get_table_count, get_table_data
 
 
@@ -49,8 +51,8 @@ class ResultGrid(ttk.Frame):
         )
         self.btn_next.pack(side=tk.LEFT, padx=5)
 
-        self.lbl_count = ttk.Label(ctrl_frame, text="Total: 0")
-        self.lbl_count.pack(side=tk.RIGHT, padx=5)
+        self.lbl_info = ttk.Label(ctrl_frame, text="")
+        self.lbl_info.pack(side=tk.RIGHT, padx=5)
 
     def load_table(self, table_name: str) -> None:
         """Loads the first page of the specified table."""
@@ -58,21 +60,50 @@ class ResultGrid(ttk.Frame):
         self.offset = 0
         try:
             self.total_rows = get_table_count(self.db, table_name)
-        except Exception:
+        except (sqlite3.Error, RuntimeError):
             self.total_rows = -1
+        self._fetch_table_data()
 
-        self._fetch_data()
+    def display_query_result(self, result: QueryResult) -> None:
+        """Displays arbitrary SQL execution results."""
+        self.current_table = None
+        self.tree.delete(*self.tree.get_children())
+
+        if result.columns:
+            self._update_grid(list(result.columns), list(result.rows))
+        else:
+            self.tree["columns"] = ("Status",)
+            self.tree.heading("Status", text="Execution Status")
+            self.tree.insert("", tk.END, values=(result.message,))
+
+        self.btn_prev.state(["disabled"])
+        self.btn_next.state(["disabled"])
+        self.lbl_page.config(text="Query Result")
+        self.lbl_info.config(text=result.message)
+
+    def display_error(self, message: str) -> None:
+        """Displays an execution error in the grid."""
+        self.current_table = None
+        self.tree.delete(*self.tree.get_children())
+        self.tree["columns"] = ("Error",)
+        self.tree.heading("Error", text="SQL Error")
+        self.tree.insert("", tk.END, values=(message,))
+
+        self.btn_prev.state(["disabled"])
+        self.btn_next.state(["disabled"])
+        self.lbl_page.config(text="Error")
+        self.lbl_info.config(text=message)
 
     def clear(self) -> None:
         """Clears the grid and resets state."""
         self.current_table = None
         self.tree.delete(*self.tree.get_children())
         self.lbl_page.config(text="Page 1")
-        self.lbl_count.config(text="Total: 0")
+        self.lbl_info.config(text="")
         self.btn_prev.state(["disabled"])
         self.btn_next.state(["disabled"])
 
-    def _fetch_data(self) -> None:
+    def _fetch_table_data(self) -> None:
         if not self.current_table or not self.db.db_path:
             return
 
@@ -82,11 +113,8 @@ class ResultGrid(ttk.Frame):
             )
             self._update_grid(cols, rows)
             self._update_controls(len(rows))
-        except Exception as e:
-            self.clear()
-            self.tree["columns"] = ("Error",)
-            self.tree.heading("Error", text="Error")
-            self.tree.insert("", tk.END, values=(str(e),))
+        except (sqlite3.Error, RuntimeError) as e:
+            self.display_error(str(e))
 
     def _update_grid(self, cols: list[str], rows: list[tuple[Any, ...]]) -> None:
         self.tree.delete(*self.tree.get_children())
@@ -111,17 +139,17 @@ class ResultGrid(ttk.Frame):
             self.tree.insert("", tk.END, values=formatted_row)
 
     def _prev_page(self) -> None:
-        if self.offset >= self.limit:
+        if self.current_table and self.offset >= self.limit:
             self.offset -= self.limit
-            self._fetch_data()
+            self._fetch_table_data()
 
     def _next_page(self) -> None:
-        self.offset += self.limit
-        self._fetch_data()
+        if self.current_table:
+            self.offset += self.limit
+            self._fetch_table_data()
 
     def _update_controls(self, fetched_count: int) -> None:
         self.btn_prev.state(["!disabled"] if self.offset > 0 else ["disabled"])
-
         has_more = fetched_count == self.limit
         self.btn_next.state(["!disabled"] if has_more else ["disabled"])
 
@@ -131,4 +159,4 @@ class ResultGrid(ttk.Frame):
         count_text = (
             f"Total: {self.total_rows}" if self.total_rows >= 0 else "Total: Unknown"
         )
-        self.lbl_count.config(text=count_text)
+        self.lbl_info.config(text=count_text)

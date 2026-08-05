@@ -1,3 +1,4 @@
+import sqlite3
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import ttk
@@ -58,7 +59,7 @@ class SchemaPanel(ttk.Frame):
                         text=obj.name,
                         values=(obj.type, obj.name),
                     )
-        except Exception as e:
+        except (sqlite3.Error, RuntimeError) as e:
             self._set_details(f"Error loading schema:\n{e}")
 
     def _on_select(self, event: Any) -> None:
@@ -98,7 +99,7 @@ class SchemaPanel(ttk.Frame):
                         details_text += obj.sql
                     break
 
-        except Exception as e:
+        except (sqlite3.Error, RuntimeError) as e:
             details_text += f"\nError loading details: {e}"
 
         self._set_details(details_text)

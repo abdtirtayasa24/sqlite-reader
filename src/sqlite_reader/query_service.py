@@ -1,6 +1,8 @@
+import time
 from typing import Any
 
 from sqlite_reader.database import DatabaseConnection
+from sqlite_reader.models import QueryResult
 from sqlite_reader.schema import get_table_columns, quote_identifier
 
 
@@ -25,8 +27,8 @@ def get_table_data(
     pk_cols = [col.name for col in columns if col.pk]
     order_clause = ""
     if pk_cols:
-        order_clause = ", ".join(quote_identifier(c) for c in pk_cols)
-        order_clause = f"ORDER BY {order_clause}"
+        order_cols = ", ".join(quote_identifier(c) for c in pk_cols)
+        order_clause = f"ORDER BY {order_cols}"
 
     sql = f"SELECT * FROM {quoted} {order_clause} LIMIT ? OFFSET ?"
     cursor = db.execute(sql, (limit, offset))
@@ -35,3 +37,46 @@ def get_table_data(
     rows = [tuple(row) for row in cursor.fetchall()]
 
     return col_names, rows
+
+
+def execute_user_query(
+    db: DatabaseConnection, sql: str, display_limit: int = 1000
+) -> QueryResult:
+    """
+    Executes a single SQL statement provided by the user and returns structured results.
+    Uses display_limit + 1 to detect result truncation without fetching excessive memory.
+    """
+    stripped_sql = sql.strip()
+    if not stripped_sql:
+        raise ValueError("SQL statement cannot be empty.")
+
+    start_time = time.perf_counter()
+    cursor = db.execute(stripped_sql)
+    execution_time_ms = (time.perf_counter() - start_time) * 1000.0
+
+    if cursor.description:
+        columns = tuple(desc[0] for desc in cursor.description)
+        fetched_rows = cursor.fetchmany(display_limit + 1)
+        truncated = len(fetched_rows) > display_limit
+        rows = tuple(tuple(row) for row in fetched_rows[:display_limit])
+        affected_rows = -1
+        message = (
+            f"Returned {len(rows)} row(s)"
+            + (" (truncated at limit)" if truncated else "")
+            + f" in {execution_time_ms:.2f} ms"
+        )
+    else:
+        columns = ()
+        rows = ()
+        affected_rows = cursor.rowcount
+        truncated = False
+        message = f"Query executed successfully. Affected rows: {affected_rows} in {execution_time_ms:.2f} ms"
+
+    return QueryResult(
+        columns=columns,
+        rows=rows,
+        affected_rows=affected_rows,
+        execution_time_ms=execution_time_ms,
+        truncated=truncated,
+        message=message,
+    )

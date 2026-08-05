@@ -16,3 +16,13 @@ class SchemaObject:
     name: str
     type: str
     sql: str | None
+
+
+@dataclass(frozen=True)
+class QueryResult:
+    columns: tuple[str, ...]
+    rows: tuple[tuple[object, ...], ...]
+    affected_rows: int
+    execution_time_ms: float
+    truncated: bool
+    message: str
