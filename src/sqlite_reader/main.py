@@ -1,4 +1,5 @@
 import tkinter as tk
+
 from sqlite_reader.ui.main_window import MainWindow
 
 
