@@ -19,9 +19,9 @@ class DatabaseConnection:
         try:
             if read_only:
                 uri = f"{path.absolute().as_uri()}?mode=ro"
-                self._connection = sqlite3.connect(uri, uri=True)
+                self._connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
             else:
-                self._connection = sqlite3.connect(path)
+                self._connection = sqlite3.connect(path, check_same_thread=False)
 
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA foreign_keys = ON")
@@ -40,6 +40,11 @@ class DatabaseConnection:
             self._connection = None
             self.db_path = None
             self.is_read_only = True
+
+    def interrupt(self) -> None:
+        """Interrupts any currently executing query on this connection from another thread."""
+        if self._connection:
+            self._connection.interrupt()
 
     def execute(self, sql: str, parameters: Sequence[object] = ()) -> sqlite3.Cursor:
         """Executes a SQL statement and returns the cursor."""

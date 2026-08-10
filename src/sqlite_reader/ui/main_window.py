@@ -1,9 +1,12 @@
+import queue
 import sqlite3
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from sqlite_reader.database import DatabaseConnection
+from sqlite_reader.models import QueryResult
 from sqlite_reader.query_service import execute_user_query
 from sqlite_reader.schema import quote_identifier
 from sqlite_reader.ui.dialogs import confirm_mutation
@@ -20,6 +23,10 @@ class MainWindow:
         self.root.geometry("1000x650")
 
         self.db = DatabaseConnection()
+        self.result_queue: queue.Queue[tuple[QueryResult | None, Exception | None]] = (
+            queue.Queue()
+        )
+        self.pending_stmt_type: StatementType = StatementType.UNKNOWN
 
         self._setup_menu()
         self._setup_ui()
@@ -64,7 +71,9 @@ class MainWindow:
         self.right_paned = ttk.PanedWindow(self.main_paned, orient=tk.VERTICAL)
         self.main_paned.add(self.right_paned, weight=3)
 
-        self.sql_editor = SqlEditor(self.right_paned, on_execute=self._execute_sql)
+        self.sql_editor = SqlEditor(
+            self.right_paned, on_execute=self._execute_sql, on_cancel=self._cancel_sql
+        )
         self.right_paned.add(self.sql_editor, weight=1)
 
         self.result_grid = ResultGrid(self.right_paned, self.db)
@@ -118,17 +127,51 @@ class MainWindow:
                 self._update_status("Execution cancelled by user.")
                 return
 
+        self.pending_stmt_type = stmt_type
+        self.sql_editor.set_running_state(True)
+        self._update_status("Executing query in background...")
+
+        def worker() -> None:
+            try:
+                res = execute_user_query(self.db, sql)
+                self.result_queue.put((res, None))
+            except (
+                sqlite3.Error,
+                ValueError,
+                RuntimeError,
+                PermissionError,
+                OSError,
+            ) as err:
+                self.result_queue.put((None, err))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.root.after(100, self._poll_result_queue)
+
+    def _cancel_sql(self) -> None:
+        if self.db.db_path:
+            self.db.interrupt()
+            self._update_status("Cancelling query execution...")
+
+    def _poll_result_queue(self) -> None:
         try:
-            result = execute_user_query(self.db, sql)
-            self.result_grid.display_query_result(result)
-            self._update_status(result.message)
+            res, err = self.result_queue.get_nowait()
+            self.sql_editor.set_running_state(False)
 
-            if stmt_type in (StatementType.SCHEMA, StatementType.MUTATION):
-                self.schema_panel.refresh()
+            if err:
+                self.result_grid.display_error(str(err))
+                self._update_status(f"Execution failed: {err}")
+            elif res:
+                self.result_grid.display_query_result(res)
+                self._update_status(res.message)
 
-        except (sqlite3.Error, ValueError, RuntimeError, PermissionError) as e:
-            self.result_grid.display_error(str(e))
-            self._update_status(f"Execution failed: {e}")
+                if self.pending_stmt_type in (
+                    StatementType.SCHEMA,
+                    StatementType.MUTATION,
+                ):
+                    self.schema_panel.refresh()
+
+        except queue.Empty:
+            self.root.after(100, self._poll_result_queue)
 
     def _backup_database(self) -> None:
         if not self.db.db_path:
