@@ -9,6 +9,9 @@ description = "A simple SQLite reader and data-management application"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+sqlite-reader = "sqlite_reader.main:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",
